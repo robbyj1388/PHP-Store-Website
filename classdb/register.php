@@ -119,7 +119,8 @@ if (isset($_POST["cancel"])) {
 
     <!-- Submit and Cancel buttons -->
     <input type="submit" name="submit" value="Register">
-    <input type="submit" name="cancel" value="Cancel">
-</form>
+
+    <!-- Cancel as a link styled like a button -->
+    <p><a href="login.php">Cancel</a></p>
 </body>
 </html>

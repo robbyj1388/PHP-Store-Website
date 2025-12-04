@@ -1,53 +1,69 @@
+<?php
+require "db.php";
+session_start();
+
+// LOGOUT HANDLING 
+// Handle logout
+if (isset($_POST["logout"])) {
+    // Destroy all session data
+    session_unset();
+    session_destroy();
+
+    // Redirect to store.php as a non-logged-in user
+    header("Location: store.php");
+    exit();
+}
+
+// REGISTRATION
+if (isset($_POST["register"])) {
+    header("Location: register.php");
+    exit();
+}
+
+// LOGIN HANDLING
+if (isset($_POST["login"])) {
+    $username = $_POST["username"];
+    $password = $_POST["password"];
+
+    $auth = authenticate($username, $password);
+
+    // Employee
+    if ($auth['type'] == 1) {
+        $_SESSION["employee_id"] = $auth['id'];
+        header("Location: emp_main.php");
+        exit();
+
+    // Customer
+    } elseif ($auth['type'] == 2) {
+        $_SESSION["customer_id"] = $auth['id'];
+        header("Location: store.php");
+        exit();
+
+    // Invalid login
+    } else {
+        $error = "Incorrect username or password";
+    }
+}
+?>
+
+<!-- HTML BELOW THIS LINE -->
 <html>
-    <body>
-        <form method="POST" action="login.php">
-            <label>Username:</label>
-            <input type="text" name="username"><br>
-            <label>Password:</label>
-            <input type="password" name="password"><br>
-            <input type="submit" name="login" value="Login">
-            <input type="submit" name="register" value="Create an Account">
-        </form>
+<body>
 
-        <?php
-        require "db.php";
-        session_start();
+<form method="POST" action="login.php">
+    <label>Username:</label>
+    <input type="text" name="username"><br>
 
-        // Destroy session on logout
-        if (isset($_POST["logout"])) {
-            session_destroy();
-        }
+    <label>Password:</label>
+    <input type="password" name="password"><br>
 
-        // User clicked register button
-        if (isset($_POST["register"])){
-            header("Location: register.php");
-            exit();
-        }
+    <input type="submit" name="login" value="Login">
+    <input type="submit" name="register" value="Create an Account">
+</form>
 
-        // User clicked the login button
-        if (isset($_POST["login"])) {
-            $username = $_POST["username"];
-            $password = $_POST["password"];
+<?php if (isset($error)): ?>
+    <p style="color:red"><?= htmlspecialchars($error) ?></p>
+<?php endif; ?>
 
-            // Use the new authenticate() function
-            $auth = authenticate($username, $password);
-
-            if ($auth['type'] == 1) {  // Employee
-                $_SESSION["employee_id"] = $auth['id'];  // store employee ID
-                // Redirect to employee main page
-                header("Location: emp_main.php");
-                exit();
-
-            } elseif ($auth['type'] == 2) {  // Customer
-                $_SESSION["customer_id"] = $auth['id']; // store customer ID
-                // Redirect to customer main page
-                header("Location: store.php");
-                exit();
-
-            } else {  // Invalid login
-                echo '<p style="color:red">Incorrect username or password</p>';
-            }
-        }
-        ?>
-    </body>
+</body>
 </html>
