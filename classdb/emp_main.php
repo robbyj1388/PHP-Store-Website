@@ -218,3 +218,18 @@ if (isset($_GET['price_history_id'])) {
     echo "</table>";
 }
 ?>
+
+<!-- Logout button -->
+<form method="post" style="margin-top:20px;">
+    <button type="submit" name="logout" style="padding:10px 18px; font-size:1rem;">Logout</button>
+</form>
+
+<?php
+    // Required to log out of the employee account
+    if (isset($_POST['logout'])) {
+        session_unset();
+        session_destroy();
+        header('Location: login.php');
+        exit();
+    }
+?>

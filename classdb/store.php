@@ -107,8 +107,9 @@ if (isset($_GET['view']) && $_GET['view'] === 'cart' && isset($_SESSION['custome
     $showCart = true;
     try {
         $dbh = connectDB();
+        // Added product id to refer to when removing an item from the cart
         $stmt = $dbh->prepare("
-            SELECT p.name, p.price, s.quantity
+            SELECT p.product_id, p.name, p.price, s.quantity
             FROM ShoppingCart s
             JOIN Product p ON s.product_id = p.product_id
             WHERE s.customer_id = :customer_id
@@ -121,7 +122,75 @@ if (isset($_GET['view']) && $_GET['view'] === 'cart' && isset($_SESSION['custome
         die("DB Error: " . $e->getMessage());
     }
 }
+
+// ---------------------
+// VIEW ORDERS HANDLING
+// ---------------------
+$orders = [];
+$showOrders = false;
+if (isset($_GET['view']) && $_GET['view'] === 'orders' && isset($_SESSION['customer_id'])) {
+    $showOrders = true;
+    try {
+        $dbh = connectDB();
+        
+        // Get all orders for this customer
+        $stmt = $dbh->prepare("SELECT order_id, date, cost, status FROM `Order` WHERE customer_id = :cid ORDER BY date DESC");
+        $stmt->execute([':cid' => $_SESSION['customer_id']]);
+        $ordersRaw = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Get all the items for each order
+        foreach ($ordersRaw as $ord) {
+            $o_id = $ord['order_id'];
+            
+            // Get the name of the order
+            $itemStmt = $dbh->prepare("
+                SELECT oi.product_id, p.name, oi.price, oi.quantity 
+                FROM OrderItem oi
+                JOIN Product p ON oi.product_id = p.product_id
+                WHERE oi.order_id = :oid
+            ");
+            $itemStmt->execute([':oid' => $o_id]);
+            $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            // Add items to the order array
+            $ord['items'] = $items;
+            $orders[] = $ord;
+        }
+        $dbh = null;
+    } catch (PDOException $e) {
+        die("DB Error: " . $e->getMessage());
+    }
+}
+
+// ---------------------
+// REMOVE FROM CART
+// ---------------------
+if (isset($_POST['remove_item']) && isset($_SESSION['customer_id'])) {
+    // Get the ID of the product to remove
+    $product_id_to_remove = intval($_POST['product_id']);
+    $customer_id = $_SESSION['customer_id'];
+
+    try {
+        $dbh = connectDB();
+        // Delete the selected row
+        $stmt = $dbh->prepare("DELETE FROM ShoppingCart WHERE customer_id = :customer_id AND product_id = :product_id");
+        $stmt->bindParam(":customer_id", $customer_id, PDO::PARAM_INT);
+        $stmt->bindParam(":product_id", $product_id_to_remove, PDO::PARAM_INT);
+        $stmt->execute();
+        
+        $cartMessage = "Item removed from cart.";
+        $dbh = null;
+        
+        // Refresh the page to show the updated cart
+        header("Location: " . $_SERVER['PHP_SELF'] . "?view=cart");
+        exit();
+    } catch (PDOException $e) {
+        die("DB Error: " . $e->getMessage());
+    }
+}
 ?>
+
+
 
 <!DOCTYPE html>
 <html>
@@ -142,6 +211,7 @@ if (isset($_GET['view']) && $_GET['view'] === 'cart' && isset($_SESSION['custome
 
     <!-- Customer buttons -->
     <form method="GET" action="store.php" style="display:inline;">
+        <input type="hidden" name="view" value="orders">
         <input type="submit" value="View Orders">
     </form>
     <form method="GET" action="store.php" style="display:inline;">
@@ -177,36 +247,83 @@ if (isset($_GET['view']) && $_GET['view'] === 'cart' && isset($_SESSION['custome
 <?php endif; ?>
 
 <!-- Display shopping cart -->
-<?php if ($showCart && !empty($cartItems)): ?>
-    <h2>Your Shopping Cart</h2>
-    <table border="1" cellpadding="5">
-        <tr>
-            <th>Product</th>
-            <th>Price</th>
-            <th>Quantity</th>
-            <th>Subtotal</th>
-        </tr>
-        <?php
-        $total = 0;
-        foreach ($cartItems as $item):
-            $subtotal = $item['price'] * $item['quantity'];
-            $total += $subtotal;
-        ?>
+<?php if ($showCart): ?>
+    
+    <!-- Message for when the cart is empty -->
+    <?php if (empty($cartItems)): ?>
+        <h2>Your Shopping Cart is Empty</h2>
+        <p>Please add some products to your cart.</p>
+    <?php else: ?>
+        <h2>Your Shopping Cart</h2>
+        <table border="1" cellpadding="5">
             <tr>
-                <td><?= htmlspecialchars($item['name']) ?></td>
-                <td>$<?= number_format($item['price'], 2) ?></td>
-                <td><?= $item['quantity'] ?></td>
-                <td>$<?= number_format($subtotal, 2) ?></td>
+                <th>Product</th>
+                <th>Price</th>
+                <th>Quantity</th>
+                <th>Subtotal</th>
+                <th>Action</th> </tr>
+            <?php
+            $total = 0;
+            foreach ($cartItems as $item):
+                $subtotal = $item['price'] * $item['quantity'];
+                $total += $subtotal;
+            ?>
+                <tr>
+                    <td><?= htmlspecialchars($item['name']) ?></td>
+                    <td>$<?= number_format($item['price'], 2) ?></td>
+                    <td><?= $item['quantity'] ?></td>
+                    <td>$<?= number_format($subtotal, 2) ?></td>
+                    
+                    <!-- This button will remove the current item from the shopping cart using the product id added earlier -->
+                    <td>
+                        <form method="POST">
+                            <input type="hidden" name="product_id" value="<?= $item['product_id'] ?>">
+                            <input type="submit" name="remove_item" value="Remove" style="color:red; cursor:pointer;">
+                        </form>
+                    </td>
+                    
+                </tr>
+            <?php endforeach; ?>
+            <tr>
+                <td colspan="3"><strong>Total</strong></td>
+                <td colspan="2"><strong>$<?= number_format($total, 2) ?></strong></td>
             </tr>
+        </table>
+        <form method="GET" action="checkout.php" style="margin-top:10px;">
+            <input type="submit" value="Checkout">
+        </form>
+    <?php endif; ?>
+
+<!-- Show order history here -->
+<?php elseif ($showOrders): ?>
+    <h2>Your Order History</h2>
+    <?php if (empty($orders)): ?>
+        <p>You have not placed any orders yet.</p>
+    <?php else: ?>
+        <?php foreach ($orders as $order): ?>
+            <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 20px;">
+                <h3>Order ID: <?= $order['order_id'] ?></h3>
+                <p><strong>Date:</strong> <?= $order['date'] ?> | <strong>Total:</strong> $<?= number_format($order['cost'], 2) ?> | <strong>Status:</strong> <?= $order['status'] ?></p>
+                
+                <table border="1" cellpadding="5" style="width: 100%;">
+                    <tr style="background-color: #f2f2f2;">
+                        <th>Product ID</th>
+                        <th>Product Name</th>
+                        <th>Price Sold</th>
+                        <th>Quantity</th>
+                    </tr>
+                    <?php foreach ($order['items'] as $item): ?>
+                        <tr>
+                            <td><?= $item['product_id'] ?></td>
+                            <td><?= htmlspecialchars($item['name']) ?></td>
+                            <td>$<?= number_format($item['price'], 2) ?></td>
+                            <td><?= $item['quantity'] ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </table>
+            </div>
         <?php endforeach; ?>
-        <tr>
-            <td colspan="3"><strong>Total</strong></td>
-            <td><strong>$<?= number_format($total, 2) ?></strong></td>
-        </tr>
-    </table>
-    <form method="GET" action="checkout.php" style="margin-top:10px;">
-        <input type="submit" value="Checkout">
-    </form>
+    <?php endif; ?>
 
 <?php elseif (!empty($searchResults)): ?>
     <h2>Products in selected category</h2>
