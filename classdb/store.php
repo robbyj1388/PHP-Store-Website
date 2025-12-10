@@ -22,9 +22,7 @@ if (isset($_POST['cancel_logout'])) {
     exit();
 }
 
-// ---------------------
 // ADD TO CART HANDLING
-// ---------------------
 $cartMessage = "";
 if (isset($_POST['add_to_cart']) && isset($_SESSION['customer_id'])) {
     $product_id = intval($_POST['product_id']);
@@ -335,7 +333,7 @@ if (isset($_POST['remove_item']) && isset($_SESSION['customer_id'])) {
                 <p>Price: $<?= number_format($product['price'], 2) ?></p>
                 <p>Stock: <?= $product['stock'] ?></p>
                 <?php if ($product['image']): ?>
-                    <img src="<?= htmlspecialchars($product['image']) ?>" alt="<?= htmlspecialchars($product['name']) ?>" width="150">
+                    <img src="<?= $product['image'] ?>" alt="<?= htmlspecialchars($product['name']) ?>" width="150">
                 <?php endif; ?>
 
                 <?php if (isset($_SESSION['customer_id'])): ?>
