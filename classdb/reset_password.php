@@ -95,6 +95,6 @@ if (isset($_POST["submit"])) {
     <input type="submit" name="submit" value="Update Password">
 </form>
 
-<p><a href="<?= $redirect_page ?>">Cancel</a></p>
+<p><a href="login.php">Cancel</a></p>
 </body>
 </html>
