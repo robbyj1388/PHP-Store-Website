@@ -30,11 +30,18 @@ if (isset($_POST["login"])) {
     // Employee
     if ($auth['type'] == 1) {
         $_SESSION["employee_id"] = $auth['id'];
+        $_SESSION["username"] = $username;
+
+        // Check if the employee must update their password
+        if (needsPasswordReset($username)) {
+            header("Location: reset_password.php");
+            exit();
+        }
+
         header("Location: emp_main.php");
         exit();
 
-    // Customer
-    } elseif ($auth['type'] == 2) {
+    } elseif ($auth['type'] == 2) {  // Customer
         $_SESSION["customer_id"] = $auth['id'];
         header("Location: store.php");
         exit();
@@ -49,6 +56,7 @@ if (isset($_POST["login"])) {
 <!-- HTML BELOW THIS LINE -->
 <html>
 <body>
+    <h1>Login Here </h1>
 
 <form method="POST" action="login.php">
     <label>Username:</label>
