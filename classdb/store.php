@@ -26,6 +26,8 @@ if (isset($_POST['cancel_logout'])) {
 // ADD TO CART HANDLING
 // ---------------------
 $cartMessage = "";
+$cartError = ""; // Initializing error variable
+
 if (isset($_POST['add_to_cart']) && isset($_SESSION['customer_id'])) {
     $product_id = intval($_POST['product_id']);
     $quantity = intval($_POST['quantity']);
@@ -34,33 +36,44 @@ if (isset($_POST['add_to_cart']) && isset($_SESSION['customer_id'])) {
     try {
         $dbh = connectDB();
 
-        // Get product name
-        $stmt = $dbh->prepare("SELECT name FROM Product WHERE product_id = :product_id");
+        // Get product name and stock
+        $stmt = $dbh->prepare("SELECT name, stock FROM Product WHERE product_id = :product_id");
         $stmt->bindParam(":product_id", $product_id, PDO::PARAM_INT);
         $stmt->execute();
         $product = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        // Check if product already in cart
-        $stmt = $dbh->prepare("SELECT quantity FROM ShoppingCart WHERE customer_id = :customer_id AND product_id = :product_id");
-        $stmt->bindParam(":customer_id", $customer_id, PDO::PARAM_INT);
-        $stmt->bindParam(":product_id", $product_id, PDO::PARAM_INT);
-        $stmt->execute();
-        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if ($existing) {
-            $newQuantity = $existing['quantity'] + $quantity;
-            $stmt = $dbh->prepare("UPDATE ShoppingCart SET quantity = :quantity WHERE customer_id = :customer_id AND product_id = :product_id");
-            $stmt->bindParam(":quantity", $newQuantity, PDO::PARAM_INT);
+        // Check stock before adding
+        if ($quantity > $product['stock']) {
+             $cartError = "Cannot add items. Only {$product['stock']} of '{$product['name']}' in stock.";
         } else {
-            $stmt = $dbh->prepare("INSERT INTO ShoppingCart (customer_id, product_id, quantity) VALUES (:customer_id, :product_id, :quantity)");
-            $stmt->bindParam(":quantity", $quantity, PDO::PARAM_INT);
+            // Check if product already in cart
+            $stmt = $dbh->prepare("SELECT quantity FROM ShoppingCart WHERE customer_id = :customer_id AND product_id = :product_id");
+            $stmt->bindParam(":customer_id", $customer_id, PDO::PARAM_INT);
+            $stmt->bindParam(":product_id", $product_id, PDO::PARAM_INT);
+            $stmt->execute();
+            $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            // Calculate new total
+            $newQuantity = $existing ? ($existing['quantity'] + $quantity) : $quantity;
+
+            if ($newQuantity > $product['stock']) {
+                $cartError = "Cannot add. Total would exceed stock of {$product['stock']}.";
+            } else {
+                if ($existing) {
+                    $stmt = $dbh->prepare("UPDATE ShoppingCart SET quantity = :quantity WHERE customer_id = :customer_id AND product_id = :product_id");
+                    $stmt->bindParam(":quantity", $newQuantity, PDO::PARAM_INT);
+                } else {
+                    $stmt = $dbh->prepare("INSERT INTO ShoppingCart (customer_id, product_id, quantity) VALUES (:customer_id, :product_id, :quantity)");
+                    $stmt->bindParam(":quantity", $quantity, PDO::PARAM_INT);
+                }
+
+                $stmt->bindParam(":customer_id", $customer_id, PDO::PARAM_INT);
+                $stmt->bindParam(":product_id", $product_id, PDO::PARAM_INT);
+                $stmt->execute();
+
+                $cartMessage = "Added {$quantity} x '{$product['name']}' to your cart!";
+            }
         }
-
-        $stmt->bindParam(":customer_id", $customer_id, PDO::PARAM_INT);
-        $stmt->bindParam(":product_id", $product_id, PDO::PARAM_INT);
-        $stmt->execute();
-
-        $cartMessage = "Added {$quantity} x '{$product['name']}' to your cart!";
         $dbh = null;
     } catch (PDOException $e) {
         die("DB Error: " . $e->getMessage());
@@ -107,9 +120,9 @@ if (isset($_GET['view']) && $_GET['view'] === 'cart' && isset($_SESSION['custome
     $showCart = true;
     try {
         $dbh = connectDB();
-        // Added product id to refer to when removing an item from the cart
+        // Added p.stock here so we can use it in the HTML table without error
         $stmt = $dbh->prepare("
-            SELECT p.product_id, p.name, p.price, s.quantity
+            SELECT p.product_id, p.name, p.price, p.stock, s.quantity
             FROM ShoppingCart s
             JOIN Product p ON s.product_id = p.product_id
             WHERE s.customer_id = :customer_id
@@ -155,6 +168,45 @@ if (isset($_GET['view']) && $_GET['view'] === 'orders' && isset($_SESSION['custo
             // Add items to the order array
             $ord['items'] = $items;
             $orders[] = $ord;
+        }
+        $dbh = null;
+    } catch (PDOException $e) {
+        die("DB Error: " . $e->getMessage());
+    }
+}
+
+// ---------------------
+// UPDATE QUANTITY HANDLING
+// ---------------------
+if (isset($_POST['update_quantity']) && isset($_SESSION['customer_id'])) {
+    $product_id = intval($_POST['product_id']);
+    $new_quantity = intval($_POST['quantity']);
+    $customer_id = $_SESSION['customer_id'];
+
+    try {
+        $dbh = connectDB();
+
+        // Check stock
+        $stmt = $dbh->prepare("SELECT name, stock FROM Product WHERE product_id = :pid");
+        $stmt->execute([':pid' => $product_id]);
+        $product = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($product) {
+            // Validate Stock
+            if ($new_quantity > $product['stock']) {
+                $cartError = "Update Failed: Only {$product['stock']} of '{$product['name']}' in stock.";
+            } elseif ($new_quantity < 1) {
+                $cartError = "Quantity must be at least 1.";
+            } else {
+                // Update
+                $stmt = $dbh->prepare("UPDATE ShoppingCart SET quantity = :qty WHERE customer_id = :cid AND product_id = :pid");
+                $stmt->execute([
+                    ':qty' => $new_quantity,
+                    ':cid' => $customer_id,
+                    ':pid' => $product_id
+                ]);
+                $cartMessage = "Quantity updated for '{$product['name']}'.";
+            }
         }
         $dbh = null;
     } catch (PDOException $e) {
@@ -209,7 +261,6 @@ if (isset($_POST['remove_item']) && isset($_SESSION['customer_id'])) {
 <?php elseif (isset($_SESSION["customer_id"])): ?>
     <h1>Welcome back!</h1>
 
-    <!-- Customer buttons -->
     <form method="GET" action="store.php" style="display:inline;">
         <input type="hidden" name="view" value="orders">
         <input type="submit" value="View Orders">
@@ -230,7 +281,6 @@ if (isset($_POST['remove_item']) && isset($_SESSION['customer_id'])) {
     <p><a href="login.php">Login</a></p>
 <?php endif; ?>
 
-<!-- Category selection -->
 <form method="GET">
     <label for="category">Select a category:</label>
     <select name="search_category" id="category">
@@ -241,15 +291,15 @@ if (isset($_POST['remove_item']) && isset($_SESSION['customer_id'])) {
     <input type="submit" value="Search">
 </form>
 
-<!-- Cart message -->
 <?php if (!empty($cartMessage)): ?>
     <p style="color:green"><?= htmlspecialchars($cartMessage) ?></p>
 <?php endif; ?>
+<?php if (!empty($cartError)): ?>
+    <p style="color:red; font-weight:bold;"><?= htmlspecialchars($cartError) ?></p>
+<?php endif; ?>
 
-<!-- Display shopping cart -->
 <?php if ($showCart): ?>
     
-    <!-- Message for when the cart is empty -->
     <?php if (empty($cartItems)): ?>
         <h2>Your Shopping Cart is Empty</h2>
         <p>Please add some products to your cart.</p>
@@ -269,12 +319,23 @@ if (isset($_POST['remove_item']) && isset($_SESSION['customer_id'])) {
                 $total += $subtotal;
             ?>
                 <tr>
-                    <td><?= htmlspecialchars($item['name']) ?></td>
+                    <td>
+                        <?= htmlspecialchars($item['name']) ?><br>
+                        <small>Stock: <?= $item['stock'] ?></small>
+                    </td>
                     <td>$<?= number_format($item['price'], 2) ?></td>
-                    <td><?= $item['quantity'] ?></td>
+                    
+                    <td>
+                        <form method="POST" style="display:inline-flex; gap:5px;">
+                            <input type="hidden" name="product_id" value="<?= $item['product_id'] ?>">
+                            <input type="number" name="quantity" value="<?= $item['quantity'] ?>" 
+                                   min="1" max="<?= $item['stock'] ?>" style="width: 60px;">
+                            <input type="submit" name="update_quantity" value="Update">
+                        </form>
+                    </td>
+                    
                     <td>$<?= number_format($subtotal, 2) ?></td>
                     
-                    <!-- This button will remove the current item from the shopping cart using the product id added earlier -->
                     <td>
                         <form method="POST">
                             <input type="hidden" name="product_id" value="<?= $item['product_id'] ?>">
@@ -294,7 +355,6 @@ if (isset($_POST['remove_item']) && isset($_SESSION['customer_id'])) {
         </form>
     <?php endif; ?>
 
-<!-- Show order history here -->
 <?php elseif ($showOrders): ?>
     <h2>Your Order History</h2>
     <?php if (empty($orders)): ?>
